@@ -36,6 +36,9 @@ const log = (...args: any[]) => {
 };
 
 // Core Capture Engine
+// Updated Core Capture Engine
+
+
 async function executeAutomatedCapture(deviceId: string) {
   log("📸 [Pipeline] Starting screen capture...");
   try {
@@ -43,31 +46,23 @@ async function executeAutomatedCapture(deviceId: string) {
       types: ["screen"],
       thumbnailSize: { width: 1920, height: 1080 },
     });
-    if (sources.length === 0) {
-      log("❌ [Pipeline] Aborted: No displays detected.");
-      return;
-    }
+    log(`   - sources found: ${sources.length}`); // add this
+    if (sources.length === 0) return;
 
     const imageBuffer = sources[0].thumbnail.toJPEG(80);
+    const base64Image = `data:image/jpeg;base64,${imageBuffer.toString("base64")}`;
+    log(`   - base64 length: ${base64Image.length}`); // add this
+    log(`   - agentSocket connected: ${agentSocket?.connected}`); // add this
 
-    const presignRes = await fetch(`${API_BASE_URL}/request-upload`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId }),
-    });
-
-    const { uploadUrl, fileName } = await presignRes.json();
-    await fetch(uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Type": "image/jpeg" },
-      body: imageBuffer,
-    });
-    await fetch(`${API_BASE_URL}/confirm-upload`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId, fileName }),
-    });
-    log("✅ [Pipeline] Success!");
+    if (agentSocket) {
+      agentSocket.emit("agent:upload_result", {
+        deviceId: deviceId,
+        image: base64Image,
+      });
+      log("   ✅ Emitted agent:upload_result");
+    } else {
+      log("   ❌ agentSocket is null — cannot emit!");
+    }
   } catch (error) {
     log("❌ [Pipeline] Error:", error);
   }
@@ -75,6 +70,8 @@ async function executeAutomatedCapture(deviceId: string) {
 
 // Socket Initialization
 function initializeAgent(token: string, deviceId: string) {
+  console.log("initializeAgent working");
+  
   if (agentSocket) agentSocket.disconnect();
   currentDeviceId = deviceId;
 
@@ -82,12 +79,17 @@ function initializeAgent(token: string, deviceId: string) {
     transports: ["websocket"],
     auth: { type: "agent", token, deviceId },
   });
-
-  agentSocket.on("connect", () => log("🟢 Agent Socket Connected"));
-  agentSocket.on("agent:capture_now", () => {
-    log("📸 [Socket] Received manual capture command!");
-    if (currentDeviceId) executeAutomatedCapture(currentDeviceId);
-  });
+  console.log("Socket:" , agentSocket)
+  agentSocket.on("connect", () => console.log("🟢 Agent Socket Connected"));
+agentSocket.on("agent:request_capture", () => {
+  console.log("📸 [Socket] Received manual capture command!");
+  console.log(`   - currentDeviceId: ${currentDeviceId}`); // add this
+  if (currentDeviceId) {
+    executeAutomatedCapture(currentDeviceId);
+  } else {
+    console.log("❌ [Socket] Received command but no deviceId set.");
+  }
+});
 }
 
 // Window Management
@@ -123,7 +125,7 @@ const watchId = ActiveWindow.subscribe((windowInfo: any) => {
     lastApp = windowInfo.application;
 
     if (!mainWindow.isDestroyed()) {
-      console.log("Sending IPC:", lastApp);
+      // console.log("Sending IPC:", lastApp);
 
       // 1. Electron renderer IPC (your local UI)
       mainWindow.webContents.send("active-app-changed", lastApp);
@@ -167,6 +169,7 @@ app.on("ready", () => {
 
 // IPC Handlers
 ipcMain.handle("initialize-agent", (event, { token, deviceId }) => {
+  log("📥 [IPC] Received initialize-agent call!");
   initializeAgent(token, deviceId);
   return { success: true };
 });

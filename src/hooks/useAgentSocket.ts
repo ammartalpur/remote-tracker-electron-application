@@ -38,27 +38,21 @@ export function useAgentSocket(hardware: any) {
 
       newSocket.on("connect", () => setStatus("verified"));
 
+      if ((window as any).electronAPI?.initializeAgent) {
+        (window as any).electronAPI
+          .initializeAgent(token, deviceId)
+          .then(() => console.log("✅ Main process agent initialized"))
+          .catch((err: any) =>
+            console.error("❌ initializeAgent failed:", err),
+          );
+      }
+
       if ((window as any).electronAPI?.onActiveAppChanged) {
         (window as any).electronAPI.onActiveAppChanged((appName: string) => {
           newSocket.emit("agent:update_app", { deviceId, appName });
         });
       }
 
-      newSocket.on("agent:request_capture", async () => {
-        try {
-          const base64Image = await (
-            window as any
-          ).electronAPI.takeScreenshot();
-          if (base64Image) {
-            newSocket.emit("agent:capture_result", {
-              deviceId,
-              image: base64Image,
-            });
-          }
-        } catch (error) {
-          console.error("🌐 [Socket] Screenshot error:", error);
-        }
-      });
 
       newSocket.on("auth_error", () => {
         localStorage.clear();
@@ -96,14 +90,27 @@ export function useAgentSocket(hardware: any) {
           setStatus("waiting_admin_approval");
       });
 
-      newSocket.on("pairing_response", (response: any) => {
-        if (response.success) {
-          localStorage.setItem("agent_token", response.token);
-          localStorage.setItem("agent_deviceId", response.deviceId);
+      newSocket.on("pairing_response", (res: any) => {
+        if (res.success) {
+          localStorage.setItem("agent_token", res.token);
+          localStorage.setItem("agent_deviceId", res.deviceId);
+
+          console.log("🚀 Attempting to initialize agent via electronAPI...");
+
+          if (
+            (window as any).electronAPI &&
+            (window as any).electronAPI.initializeAgent
+          ) {
+            (window as any).electronAPI
+              .initializeAgent(res.token, res.deviceId)
+              .then(() => console.log("✅ IPC call success!"))
+              .catch((err: any) => console.error("❌ IPC call failed:", err));
+          } else {
+            console.error("❌ electronAPI.initializeAgent is undefined!");
+          }
+
           newSocket.disconnect();
           window.location.reload();
-        } else {
-          alert(response.message || "Pairing failed.");
         }
       });
     }
