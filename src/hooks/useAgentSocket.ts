@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 import { getPreciseLocation } from "../lib/hardware";
 
-// 🚀 UPDATED: Using your Cloudflare URL
 const SERVER_URL = "http://localhost:4000";
 
 export type AgentStatus =
@@ -24,28 +23,54 @@ export function useAgentSocket(hardware: any) {
 
     let newSocket: Socket;
 
-    // 🚀 UPDATED: secure: false is safer for Cloudflare Tunnels
     const socketOptions = {
       transports: ["websocket"],
       secure: false,
     };
 
     if (token && deviceId) {
+      // ==========================================
+      // 1. RETURNING USER FLOW
+      // ==========================================
       newSocket = io(SERVER_URL, {
         ...socketOptions,
         auth: { type: "agent", token, deviceId },
       });
 
-      newSocket.on("connect", () => setStatus("verified"));
+      newSocket.on("connect", () => {
+        setStatus("verified");
 
-      if ((window as any).electronAPI?.initializeAgent) {
-        (window as any).electronAPI
-          .initializeAgent(token, deviceId)
-          .then(() => console.log("✅ Main process agent initialized"))
-          .catch((err: any) =>
-            console.error("❌ initializeAgent failed:", err),
-          );
-      }
+        if ((window as any).electronAPI?.initializeAgent) {
+          (window as any).electronAPI
+            .initializeAgent(token, deviceId)
+            .then(() => {
+              console.log("✅ Main process agent initialized");
+
+              // 🚀 CRITICAL FIX: Restart the history loop for returning users
+              if ((window as any).electronAPI.startHistoryLoop) {
+                console.log(
+                  "🌐 [Frontend] Calling startHistoryLoop for returning session...",
+                );
+                (window as any).electronAPI
+                  .startHistoryLoop(deviceId)
+                  .then(() =>
+                    console.log(
+                      "✅ [Frontend] startHistoryLoop promise resolved!",
+                    ),
+                  )
+                  .catch((err: any) =>
+                    console.error(
+                      "❌ [Frontend] startHistoryLoop IPC failed:",
+                      err,
+                    ),
+                  );
+              }
+            })
+            .catch((err: any) =>
+              console.error("❌ initializeAgent failed:", err),
+            );
+        }
+      });
 
       if ((window as any).electronAPI?.onActiveAppChanged) {
         (window as any).electronAPI.onActiveAppChanged((appName: string) => {
@@ -53,12 +78,14 @@ export function useAgentSocket(hardware: any) {
         });
       }
 
-
       newSocket.on("auth_error", () => {
         localStorage.clear();
         window.location.reload();
       });
     } else {
+      // ==========================================
+      // 2. NEW USER / PAIRING FLOW
+      // ==========================================
       newSocket = io(SERVER_URL, {
         ...socketOptions,
         auth: { type: "agent" },
@@ -90,12 +117,13 @@ export function useAgentSocket(hardware: any) {
           setStatus("waiting_admin_approval");
       });
 
+      // 🚀 CONSOLIDATED PAIRING RESPONSE
       newSocket.on("pairing_response", (res: any) => {
         if (res.success) {
           localStorage.setItem("agent_token", res.token);
           localStorage.setItem("agent_deviceId", res.deviceId);
 
-          console.log("🚀 Attempting to initialize agent via electronAPI...");
+          console.log("🚀 Attempting to initialize agent...");
 
           if (
             (window as any).electronAPI &&
@@ -103,13 +131,34 @@ export function useAgentSocket(hardware: any) {
           ) {
             (window as any).electronAPI
               .initializeAgent(res.token, res.deviceId)
-              .then(() => console.log("✅ IPC call success!"))
+              .then(() => {
+                console.log("✅ Agent initialized successfully!");
+
+                if ((window as any).electronAPI.startHistoryLoop) {
+                  console.log(
+                    "🌐 [Frontend] Calling startHistoryLoop after new pairing...",
+                  );
+                  (window as any).electronAPI
+                    .startHistoryLoop(res.deviceId)
+                    .then(() =>
+                      console.log(
+                        "✅ [Frontend] startHistoryLoop promise resolved!",
+                      ),
+                    )
+                    .catch((err: any) =>
+                      console.error(
+                        "❌ [Frontend] startHistoryLoop IPC failed:",
+                        err,
+                      ),
+                    );
+                }
+              })
               .catch((err: any) => console.error("❌ IPC call failed:", err));
-          } else {
-            console.error("❌ electronAPI.initializeAgent is undefined!");
           }
 
           newSocket.disconnect();
+
+          // Re-enable this reload so the UI updates from "Pairing" to "Verified"
           window.location.reload();
         }
       });
