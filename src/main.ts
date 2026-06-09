@@ -20,6 +20,7 @@ if (started) app.quit();
 
 // Configuration
 const API_BASE_URL = "http://localhost:4000/api/capture";
+const HISTORY_UPLOAD_URL = "http://localhost:4000/api/captures/upload";
 const SERVER_URL = "http://localhost:4000";
 let captureInterval: NodeJS.Timeout | null = null;
 let currentDeviceId: string | null = null;
@@ -68,6 +69,38 @@ async function executeAutomatedCapture(deviceId: string) {
   }
 }
 
+async function captureAndSaveHistory(deviceId: string) {
+  console.log("captureAndSaveHistory working");
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: 1920, height: 1080 },
+    });
+
+    if (sources.length === 0) return;
+
+    // Compress heavily for history to save bandwidth/storage (e.g., 60% quality)
+    const imageBuffer = sources[0].thumbnail.toJPEG(60);
+    const base64Image = `data:image/jpeg;base64,${imageBuffer.toString("base64")}`;
+
+    log(`🕒 [History Engine] Pushing 1-minute capture for ${deviceId}...`);
+
+    const response = await fetch(HISTORY_UPLOAD_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deviceId: deviceId,
+        imageBase64: base64Image,
+      }),
+    });
+
+    if (!response.ok) throw new Error("Server rejected history upload");
+    log("✅ [History Engine] Upload successful.");
+  } catch (error) {
+    log("❌ [History Engine] Failed:", error);
+  }
+}
+
 // Socket Initialization
 function initializeAgent(token: string, deviceId: string) {
   console.log("initializeAgent working");
@@ -79,11 +112,11 @@ function initializeAgent(token: string, deviceId: string) {
     transports: ["websocket"],
     auth: { type: "agent", token, deviceId },
   });
-  console.log("Socket:" , agentSocket)
+  // console.log("Socket:" , agentSocket)
   agentSocket.on("connect", () => console.log("🟢 Agent Socket Connected"));
 agentSocket.on("agent:request_capture", () => {
   console.log("📸 [Socket] Received manual capture command!");
-  console.log(`   - currentDeviceId: ${currentDeviceId}`); // add this
+  // console.log(`   - currentDeviceId: ${currentDeviceId}`); // add this
   if (currentDeviceId) {
     executeAutomatedCapture(currentDeviceId);
   } else {
@@ -182,9 +215,30 @@ ipcMain.handle("start-capture-engine", (event, deviceId: string) => {
   return { success: true };
 });
 
+ipcMain.handle("start-history-loop", (event, deviceId: string) => {
+  console.log("start-history-loop working");
+  log("🔄 [IPC] Starting 1-minute history loop...");
+
+  if (captureInterval) {
+    log("⚠️ [IPC] History loop is already running.");
+    return { success: true };
+  }
+
+  currentDeviceId = deviceId;
+
+  // Fire once immediately, then set the 1-minute interval (60000ms)
+  captureAndSaveHistory(deviceId);
+  captureInterval = setInterval(() => captureAndSaveHistory(deviceId), 60000);
+
+  return { success: true };
+});
+
 ipcMain.handle("get-system-info", () => getSystemInfo());
 ipcMain.handle("get-mac-address", () => getMacAddress());
 ipcMain.handle("get-network-location", () => getNetworkLocation());
+
+
+
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
