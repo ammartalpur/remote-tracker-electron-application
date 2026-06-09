@@ -19,9 +19,9 @@ import { io, Socket } from "socket.io-client";
 if (started) app.quit();
 
 // Configuration
-const API_BASE_URL = "http://localhost:4000/api/capture";
-const HISTORY_UPLOAD_URL = "http://localhost:4000/api/captures/upload";
-const SERVER_URL = "http://localhost:4000";
+const HISTORY_UPLOAD_URL =
+  "https://remote-tracker-server-production.up.railway.app/api/captures/upload";
+const SERVER_URL = "https://remote-tracker-server-production.up.railway.app";
 let captureInterval: NodeJS.Timeout | null = null;
 let currentDeviceId: string | null = null;
 let agentSocket: Socket | null = null;

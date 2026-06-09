@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 import { getPreciseLocation } from "../lib/hardware";
 
-const SERVER_URL = "http://localhost:4000";
+const SERVER_URL = "https://remote-tracker-server-production.up.railway.app";
 
 export type AgentStatus =
   | "connecting"
